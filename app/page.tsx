@@ -32,12 +32,12 @@ export default function Home() {
   const [bestMoveLAN,  setBestMoveLAN]  = useState('');
   const [bestMoveSAN,  setBestMoveSAN]  = useState('');
 
-  const [opponentMode, setOpponentMode] = useState<OpponentMode>('human');
+  const [opponentMode, setOpponentMode] = useState<OpponentMode>('stockfish');
   const [playerColor,  setPlayerColor]  = useState<PlayerColor>('white');
   const [difficulty,   setDifficulty]   = useState<BotDifficulty>('medium');
 
   const prevEvalRef      = useRef<EvalSnapshot | null>(null);
-  const opponentModeRef  = useRef<OpponentMode>('human');
+  const opponentModeRef  = useRef<OpponentMode>('stockfish');
   const playerColorRef   = useRef<PlayerColor>('white');
   const difficultyRef    = useRef<BotDifficulty>('medium');
   const botTurnPendingRef= useRef(false);
