@@ -114,7 +114,7 @@ export default function OpponentSettings({
         className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
       >
         <span>♟️</span>
-        <span className="hidden sm:inline">Game Mode</span>
+        <span>Game Mode</span>
       </button>
 
       {/* ── Modal — portalled to document.body to escape backdrop-filter stacking context ── */}
