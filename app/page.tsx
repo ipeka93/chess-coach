@@ -35,6 +35,7 @@ export default function Home() {
   const [opponentMode, setOpponentMode] = useState<OpponentMode>('stockfish');
   const [playerColor,  setPlayerColor]  = useState<PlayerColor>('white');
   const [difficulty,   setDifficulty]   = useState<BotDifficulty>('medium');
+  const [waitingForOpponent, setWaitingForOpponent] = useState(false);
 
   const prevEvalRef      = useRef<EvalSnapshot | null>(null);
   const opponentModeRef  = useRef<OpponentMode>('stockfish');
@@ -78,7 +79,7 @@ export default function Home() {
     finally   { setIsAnalyzing(false); }
   }
 
-  // ── Maybe trigger bot move ────────────────────────────────────────────────
+  // ── Bot move ──────────────────────────────────────────────────────────────
   async function maybeTriggerBotMove(currentFen: string) {
     const engine = engineRef.current;
     if (!engine) return;
@@ -100,6 +101,8 @@ export default function Home() {
       catch { return; }
       gameRef.current = clone;
       setFen(clone.fen());
+      // Board position changed — clear coaching so it never describes the wrong board
+      setAnalysis(null);
       setIsAnalyzing(true);
       try {
         const newEval = await engine.evaluate(clone.fen());
@@ -112,7 +115,7 @@ export default function Home() {
     } finally { setIsBotThinking(false); botTurnPendingRef.current = false; }
   }
 
-  // ── Analyze user's move, then maybe trigger bot ───────────────────────────
+  // ── Analyze user's move; show feedback BEFORE bot responds ───────────────
   async function runAnalysisAndMaybeBotMove(
     beforeFen: string, afterFen: string,
     moveSAN: string, isWhite: boolean,
@@ -138,13 +141,23 @@ export default function Home() {
       setBestMoveSAN(lanToSAN(afterFen, newEval.bestMove));
     } catch { /* terminated */ }
     finally   { setIsAnalyzing(false); }
-    await maybeTriggerBotMove(gameRef.current.fen());
+
+    // Do NOT move the bot immediately — the coaching text now describes the visible board.
+    // Only offer the bot move once the user is ready.
+    const botColor = playerColorRef.current === 'white' ? 'b' : 'w';
+    const shouldBotMove =
+      opponentModeRef.current !== 'human' &&
+      !gameRef.current.isGameOver() &&
+      gameRef.current.turn() === botColor;
+    if (shouldBotMove) setWaitingForOpponent(true);
   }
 
   // ── Board move handler ────────────────────────────────────────────────────
   const handleMove = useCallback(
     (from: string, to: string, promotion = 'q'): boolean => {
       if (isBotThinking) return false;
+      // Block user moves while waiting for them to trigger the opponent's reply
+      if (waitingForOpponent) return false;
       if (opponentModeRef.current !== 'human') {
         const userColor = playerColorRef.current === 'white' ? 'w' : 'b';
         if (gameRef.current.turn() !== userColor) return false;
@@ -161,7 +174,7 @@ export default function Home() {
       return true;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [isBotThinking],
+    [isBotThinking, waitingForOpponent],
   );
 
   // ── New Game ──────────────────────────────────────────────────────────────
@@ -173,8 +186,10 @@ export default function Home() {
     setPrevEval(null); prevEvalRef.current = null;
     setBestMoveLAN(''); setBestMoveSAN('');
     setIsBotThinking(false);
+    setWaitingForOpponent(false);
     setOrientation(playerColorRef.current);
     if (engineRef.current) await evaluatePosition(newGame.fen());
+    // Bot moves first automatically at game start (no user coaching to align yet)
     await maybeTriggerBotMove(gameRef.current.fen());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -188,6 +203,7 @@ export default function Home() {
     setPrevEval(null); prevEvalRef.current = null;
     setBestMoveLAN(''); setBestMoveSAN('');
     setIsBotThinking(false);
+    setWaitingForOpponent(false);
     if (engineRef.current) await evaluatePosition(newGame.fen());
   }, []);
 
@@ -200,6 +216,7 @@ export default function Home() {
     setPrevEval(null); prevEvalRef.current = null;
     setBestMoveLAN(''); setBestMoveSAN('');
     setIsBotThinking(false);
+    setWaitingForOpponent(false);
     if (engineRef.current) await evaluatePosition(newFen);
   }, []);
 
@@ -207,9 +224,15 @@ export default function Home() {
     setOrientation((prev) => (prev === 'white' ? 'black' : 'white'));
   }, []);
 
-  // Only lock the board while the bot is choosing its move.
-  // isAnalyzing (background evaluation) must not block the user —
-  // on mobile the WASM load can take several seconds and the board would be unusable.
+  // ── Trigger bot move on demand ────────────────────────────────────────────
+  const handleOpponentMove = useCallback(async () => {
+    setWaitingForOpponent(false);
+    await maybeTriggerBotMove(gameRef.current.fen());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Lock the board only while the bot is computing its move.
+  // waitingForOpponent keeps user moves blocked via handleMove guard (board stays visible).
   const boardDisabled = isBotThinking;
 
   return (
@@ -273,6 +296,16 @@ export default function Home() {
               <p className="text-center text-amber-400 text-xs mt-2 animate-pulse">
                 Bot is thinking…
               </p>
+            )}
+
+            {/* Let opponent move — shown after user's move is analyzed, before bot replies */}
+            {waitingForOpponent && !isBotThinking && opponentMode !== 'human' && (
+              <button
+                onClick={handleOpponentMove}
+                className="w-full mt-3 py-2.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-500 rounded-lg transition-colors text-white"
+              >
+                Let opponent move →
+              </button>
             )}
 
             <div className="flex gap-2 mt-3">

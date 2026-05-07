@@ -1,81 +1,56 @@
-import { Chess, SQUARES } from 'chess.js';
-import type { Square } from 'chess.js';
-import type { MoveRating, MoveAnalysis } from '../types/chess';
-
-const PIECE_NAMES: Record<string, string> = {
-  p: 'pawn',
-  n: 'knight',
-  b: 'bishop',
-  r: 'rook',
-  q: 'queen',
-  k: 'king',
-};
+import { Chess } from 'chess.js';
+import type { Square, Color } from 'chess.js';
+import type { MoveRating, MoveAnalysis, DebugInfo } from '../types/chess';
+import {
+  PIECE_NAMES,
+  getHangingPieces,
+  getBestFreeCapture,
+  getOpponentChecks,
+  detectFork,
+  isDevelopment,
+  countDeveloped,
+  describeSquare,
+  generateNextPlan,
+  validateClaim,
+  swapTurn,
+  type CaptureInfo,
+} from './positionAnalysis';
 
 const CENTER_SQUARES = new Set(['e4', 'e5', 'd4', 'd5']);
 
-// Starting squares for each piece type by color
-const STARTING: Record<string, Record<string, string[]>> = {
-  w: { n: ['b1', 'g1'], b: ['c1', 'f1'], q: ['d1'], r: ['a1', 'h1'] },
-  b: { n: ['b8', 'g8'], b: ['c8', 'f8'], q: ['d8'], r: ['a8', 'h8'] },
-};
+const BANNED_PHRASES = [
+  'your position is solid',
+  'continue developing',
+  'keep developing your pieces',
+  'look for ways',
+  'no obvious tricks',
+  'improves your position',
+  'well-coordinated',
+  'keep your pieces active',
+  'stronger position overall',
+  'improve their position',
+  'keep developing',
+];
+
+function sanitize(text: string): string {
+  const lower = text.toLowerCase();
+  for (const phrase of BANNED_PHRASES) {
+    if (lower.includes(phrase)) {
+      return '[coaching engine: generic phrase slipped through — report this position]';
+    }
+  }
+  return text;
+}
 
 const PRINCIPLES = {
-  protect:
-    'Always make sure your pieces are protected. A piece nobody is defending can be taken for free!',
-  free_capture:
-    'When you can take a piece that has no protection, you almost always should.',
-  king_safety:
-    'Castle early to move your king to safety behind your pawns. An exposed king is very dangerous.',
-  no_queen_early:
-    "Don't bring your queen out too early — it can be chased around and you'll waste moves.",
-  develop:
-    'In the opening, bring your knights and bishops into the game quickly so they can join the fight.',
-  center:
-    'Controlling the center squares (e4, e5, d4, d5) gives your pieces more space and power.',
-  look_for_tactics:
-    'Before every move, ask: can I check the king, take a free piece, or create a big threat?',
+  protect: 'Always check if your pieces are defended. An unprotected piece can be taken for free on the next move.',
+  free_capture: 'Before every move, scan for undefended enemy pieces — taking them costs nothing.',
+  king_safety: 'Castle early to move your king behind your pawns. A king stuck in the center is a liability.',
+  no_queen_early: "Don't bring your queen out in the first few moves — it gets chased by cheaper pieces and you waste tempo.",
+  develop: 'In the opening, get your knights and bishops off the back rank before pushing pawns or attacking.',
+  center: 'Pieces placed in or near the center (d4/d5/e4/e5) control more squares and are harder to attack.',
+  look_for_tactics: 'Before every move, ask: can I take a piece, give check, or create a threat my opponent must answer?',
 };
-
-function isDevelopmentMove(from: string, piece: string, color: string): boolean {
-  if (piece === 'p' || piece === 'k') return false;
-  return STARTING[color]?.[piece]?.includes(from) ?? false;
-}
-
-function countDeveloped(chess: Chess, color: string): number {
-  let count = 0;
-  for (const [piece, squares] of Object.entries(STARTING[color] ?? {})) {
-    for (const sq of squares) {
-      const p = chess.get(sq as Square);
-      if (!p || p.type !== piece || p.color !== color) count++;
-    }
-  }
-  return count;
-}
-
-function findHanging(chess: Chess, color: string): string | null {
-  const opp = color === 'w' ? 'b' : 'w';
-  for (const sq of SQUARES) {
-    const p = chess.get(sq);
-    if (p && p.color === color && p.type !== 'k') {
-      if (chess.isAttacked(sq, opp as 'w' | 'b') && !chess.isAttacked(sq, color as 'w' | 'b')) {
-        return `${PIECE_NAMES[p.type]} on ${sq}`;
-      }
-    }
-  }
-  return null;
-}
-
-function findFreeCapture(chess: Chess): string | null {
-  const color = chess.turn();
-  const opp = color === 'w' ? 'b' : 'w';
-  const moves = chess.moves({ verbose: true });
-  for (const m of moves) {
-    if (m.isCapture() && !chess.isAttacked(m.to, opp as 'w' | 'b')) {
-      return `${PIECE_NAMES[m.captured!]} on ${m.to}`;
-    }
-  }
-  return null;
-}
 
 export function generateExplanation(
   movePlayed: string,
@@ -85,179 +60,273 @@ export function generateExplanation(
   afterFen: string,
 ): MoveAnalysis {
   const before = new Chess(beforeFen);
-  const after = new Chess(afterFen);
+  const after  = new Chess(afterFen);
 
-  // Parse the played move
+  // ── Parse played move ────────────────────────────────────────────────────
   const tempA = new Chess(beforeFen);
   let moveResult;
-  try {
-    moveResult = tempA.move(movePlayed);
-  } catch {
-    // Fallback: return a minimal explanation
+  try { moveResult = tempA.move(movePlayed); }
+  catch {
     return {
-      movePlayed,
-      bestMove: bestMoveSAN,
-      rating,
-      why: `The best move was ${bestMoveSAN}.`,
-      whatAllows: 'See if you can spot the difference.',
-      beginnerPrinciple: PRINCIPLES.develop,
-      nextPlan: 'Keep developing your pieces.',
+      movePlayed, bestMove: bestMoveSAN, rating,
+      whatItDid: `You played ${movePlayed}.`,
+      why: `The engine preferred ${bestMoveSAN}.`,
+      whatAllows: 'No immediate threats detected.',
+      beginnerPrinciple: PRINCIPLES.look_for_tactics,
+      nextPlan: 'No clear plan detected. Look for checks, captures, or threats.',
     };
   }
 
-  const color = moveResult.color;
-  const isWhite = color === 'w';
-  const piece = moveResult.piece;
-  const capturedPiece = moveResult.captured;
-  const isCapture = moveResult.isCapture();
-  const isCastle = moveResult.isKingsideCastle() || moveResult.isQueensideCastle();
-  const isCheck = after.inCheck();
+  const color      = moveResult.color as Color;
+  const isWhite    = color === 'w';
+  const opp        = (isWhite ? 'b' : 'w') as Color;
+  const piece      = moveResult.piece;
+  const captured   = moveResult.captured;
+  const isCapture  = moveResult.isCapture();
+  const isCastle   = moveResult.isKingsideCastle() || moveResult.isQueensideCastle();
+  const isCheck    = after.inCheck();
   const isCheckmate = after.isCheckmate();
-  const fromSq = moveResult.from;
-  const toSq = moveResult.to;
-  const isDev = isDevelopmentMove(fromSq, piece, color);
+  const fromSq     = moveResult.from;
+  const toSq       = moveResult.to;
+  const isDev      = isDevelopment(fromSq, piece, color);
   const controlsCenter = CENTER_SQUARES.has(toSq);
   const isQueenMove = piece === 'q';
-  const isBigPawn = moveResult.isBigPawn();
+  const isBigPawn  = moveResult.isBigPawn();
   const moveNumber = before.moveNumber();
-  const isOpening = moveNumber <= 15;
+  const isOpening  = moveNumber <= 15;
+  const isBestMove = rating === 'Best' || movePlayed === bestMoveSAN;
+  const pieceName  = PIECE_NAMES[piece] ?? 'piece';
 
-  // Parse best move
+  // Guard: produce text only when a specific board claim is verified.
+  // board = the chess instance to validate "piece on square" claims against.
+  function guard(text: string, board: Chess, fallback: string): string {
+    return validateClaim(text, board, color) ? text : fallback;
+  }
+
+  // ── Parse best move ──────────────────────────────────────────────────────
   const tempB = new Chess(beforeFen);
   let bestResult;
-  try {
-    bestResult = tempB.move(bestMoveSAN);
-  } catch {
-    bestResult = null;
-  }
-  const bestIsCapture = bestResult?.isCapture() ?? false;
-  const bestIsCastle =
-    (bestResult?.isKingsideCastle() ?? false) ||
-    (bestResult?.isQueensideCastle() ?? false);
-  const bestIsDev = bestResult
-    ? isDevelopmentMove(bestResult.from, bestResult.piece, bestResult.color)
-    : false;
+  try { bestResult = tempB.move(bestMoveSAN); } catch { bestResult = null; }
+  const bestIsCapture      = bestResult?.isCapture() ?? false;
+  const bestIsCastle       = (bestResult?.isKingsideCastle() ?? false) || (bestResult?.isQueensideCastle() ?? false);
+  const bestIsDev          = bestResult ? isDevelopment(bestResult.from, bestResult.piece, bestResult.color) : false;
   const bestControlsCenter = bestResult ? CENTER_SQUARES.has(bestResult.to) : false;
-  const bestPiece = bestResult?.piece ?? '';
-  const bestCaptured = bestResult?.captured ?? '';
+  const bestPiece          = bestResult?.piece ?? '';
+  const bestCaptured       = bestResult?.captured ?? '';
+  const bestToSq           = bestResult?.to ?? '';
+  const bestPieceName      = PIECE_NAMES[bestPiece] ?? 'piece';
 
-  // Contextual facts
-  const developedCount = countDeveloped(before, color);
-  const hangingAfter = findHanging(after, color);
-  const freeBefore = findFreeCapture(before);
-  const pieceName = PIECE_NAMES[piece] ?? 'piece';
-  const bestPieceName = PIECE_NAMES[bestPiece] ?? 'piece';
-  const isBestMove = movePlayed === bestMoveSAN || rating === 'Best';
+  // ── Verified position facts ──────────────────────────────────────────────
 
-  // ── WHY ──────────────────────────────────────────────────────────────────
-  let why = '';
+  // Opponent's legal options after user's move:
+  const oppLegalMoves = after.moves({ verbose: true });
+  const oppFreeCap    = getBestFreeCapture(after);   // opp's best free capture of user's piece (legal-move based)
+  const oppChecks     = getOpponentChecks(after);    // check moves opp can make (SAN-based, always accurate)
 
+  // Verify oppFreeCap: the piece must exist on that square in `after`
+  const oppFreeCapVerified: CaptureInfo | null = (() => {
+    if (!oppFreeCap) return null;
+    const p = after.get(oppFreeCap.to as Square);
+    if (!p || p.color !== color || PIECE_NAMES[p.type] !== PIECE_NAMES[oppFreeCap.captured]) return null;
+    return oppFreeCap;
+  })();
+
+  // User's hanging pieces: isAttacked-based, then cross-checked against actual opponent legal moves
+  const userHangingVerified = getHangingPieces(after, color)
+    .filter(h => oppLegalMoves.some(m => m.to === h.square && m.isCapture()));
+
+  // User could have taken this for free before their move (legal-move based)
+  const freeBefore = getBestFreeCapture(before);
+  // Verify freeBefore: the piece must have existed in `before`
+  const freeBeforeVerified: CaptureInfo | null = (() => {
+    if (!freeBefore) return null;
+    const p = before.get(freeBefore.to as Square);
+    if (!p || p.color !== opp || PIECE_NAMES[p.type] !== PIECE_NAMES[freeBefore.captured]) return null;
+    return freeBefore;
+  })();
+
+  // Fork detection (uses legal moves from swapped position — accounts for pins)
+  const forkCreated = detectFork(beforeFen, `${fromSq}${toSq}`);
+  // Verify fork targets: each forked square must have an actual opponent piece in `after`
+  const verifiedForkTargets = (forkCreated?.targets ?? []).filter(sq => {
+    const p = after.get(sq as Square);
+    return p && p.color === opp;
+  });
+
+  // User's free capture available next turn (verified via swapped position + piece existence)
+  let nextFreeCapAfter: CaptureInfo | null = null;
+  try {
+    const swapped = new Chess(swapTurn(afterFen));
+    const cap = getBestFreeCapture(swapped);
+    if (cap) {
+      // Double-check: the piece must exist in the after position with correct type/color
+      const p = after.get(cap.to as Square);
+      if (p && p.color === opp && PIECE_NAMES[p.type] === PIECE_NAMES[cap.captured]) {
+        nextFreeCapAfter = cap;
+      }
+    }
+  } catch { /* ignore */ }
+
+  // Verify best-move capture: the piece must have existed in `before`
+  const bestCaptureVerified: boolean = (() => {
+    if (!bestIsCapture || !bestCaptured || !bestToSq) return false;
+    const p = before.get(bestToSq as Square);
+    return !!(p && p.color === opp && PIECE_NAMES[p.type] === PIECE_NAMES[bestCaptured]);
+  })();
+
+  const devCount = countDeveloped(before, color);
+
+  // ── WHAT IT DID ──────────────────────────────────────────────────────────
+  let whatItDid: string;
+  if (isCheckmate) {
+    whatItDid = `Your ${pieceName} moved to ${toSq} — checkmate!`;
+  } else if (isCheck) {
+    whatItDid = `Your ${pieceName} moved to ${describeSquare(toSq)}, putting the king in check.`;
+  } else if (isCapture && captured) {
+    whatItDid = `Your ${pieceName} on ${fromSq} took the ${PIECE_NAMES[captured]} on ${describeSquare(toSq)}.`;
+  } else if (isCastle) {
+    whatItDid = `You castled — king moved to safety, rook became active.`;
+  } else if (verifiedForkTargets.length >= 2) {
+    // Both fork targets verified to exist on those squares
+    const targets = verifiedForkTargets.slice(0, 2).map(sq => {
+      const p = after.get(sq as Square)!;
+      return `the ${PIECE_NAMES[p.type]} on ${sq}`;
+    }).join(' and ');
+    whatItDid = guard(
+      `Your ${pieceName} moved to ${toSq}, attacking ${targets} at the same time — a fork!`,
+      after,
+      `Your ${pieceName} moved from ${fromSq} to ${describeSquare(toSq)}.`,
+    );
+  } else {
+    whatItDid = `Your ${pieceName} moved from ${fromSq} to ${describeSquare(toSq)}.`;
+  }
+
+  // ── WHY THIS MOVE MATTERS ────────────────────────────────────────────────
+  let why: string;
   if (isBestMove) {
     if (isCheckmate) {
-      why = `You delivered checkmate! The game is over — you won!`;
+      why = `That's the winning move — the king has no legal escape.`;
     } else if (isCheck) {
-      why = `Excellent! Checking the king forces your opponent to respond immediately, keeping you in control of the game.`;
-    } else if (isCapture && capturedPiece) {
-      why = `You captured the ${PIECE_NAMES[capturedPiece]} — winning material is one of the best things you can do in chess!`;
+      why = `Checking the king on ${toSq} forces your opponent to respond, keeping you in control.`;
+    } else if (isCapture && captured) {
+      why = `Taking the ${PIECE_NAMES[captured]} on ${describeSquare(toSq)} wins material — you're now up a ${PIECE_NAMES[captured]}.`;
     } else if (isCastle) {
-      why = `Perfect — castling puts your king behind your pawns where it's safe, and connects your rooks so they can work together.`;
+      why = `Castling was the engine's top choice — king behind the pawns and rook enters the game.`;
+    } else if (verifiedForkTargets.length >= 2) {
+      const targets = verifiedForkTargets.slice(0, 2).map(sq => {
+        const p = after.get(sq as Square)!;
+        return `the ${PIECE_NAMES[p.type]} on ${sq}`;
+      }).join(' and ');
+      const candidate = `Your ${pieceName} on ${toSq} now attacks ${targets} at once — your opponent can only save one.`;
+      why = guard(candidate, after, `The engine prefers ${bestMoveSAN}, but this app cannot yet identify the exact reason.`);
+    } else if (nextFreeCapAfter) {
+      // Verified: user can legally take this piece and it exists on that square
+      const candidate = `After this move, your opponent's ${PIECE_NAMES[nextFreeCapAfter.captured]} on ${nextFreeCapAfter.to} is undefended — take it with ${nextFreeCapAfter.san} next turn.`;
+      why = guard(candidate, after, `The engine prefers ${bestMoveSAN}, but this app cannot yet identify the exact reason.`);
     } else if (isDev && isOpening) {
-      why = `Great development! Bringing your ${pieceName} into the game gives it more power and gets you ready to attack.`;
-    } else if (isBigPawn) {
-      why = `Moving the pawn two squares controls the center and opens lines for your pieces — a strong opening move!`;
+      why = `Developing your ${pieceName} to ${describeSquare(toSq)} gets it off the back rank and into the game.`;
+    } else if (isBigPawn && controlsCenter) {
+      why = `Pushing the pawn two squares stakes a claim in the center, giving your pieces more room.`;
     } else if (controlsCenter) {
-      why = `That square gives you strong control of the center, which means your pieces will have more room to operate.`;
+      why = `${describeSquare(toSq)} is a central square — your ${pieceName} controls more of the board from there.`;
     } else {
-      why = `That's a strong move that improves your position and keeps your pieces active.`;
+      why = `The engine prefers ${bestMoveSAN}, but this app cannot yet identify the exact reason.`;
     }
   } else {
-    // Explain why the BEST move was better
-    if (bestIsCapture && bestCaptured) {
-      why = `The best move was ${bestMoveSAN}, which captures the ${PIECE_NAMES[bestCaptured]} for free. Always look for pieces that aren't defended — you can take them without losing anything!`;
+    // Explain why the best move was better
+    if (bestCaptureVerified && bestCaptured) {
+      // Verified: the captured piece exists in `before`
+      const isFreeCapture = freeBeforeVerified?.to === bestToSq;
+      const qualifier = isFreeCapture ? 'for free — it has no protection' : '';
+      const candidate = isFreeCapture
+        ? `The best move was ${bestMoveSAN} — it takes the undefended ${PIECE_NAMES[bestCaptured]} on ${describeSquare(bestToSq)} for free.`
+        : `The best move was ${bestMoveSAN} — it captures the ${PIECE_NAMES[bestCaptured]} on ${describeSquare(bestToSq)}${qualifier}.`;
+      why = guard(candidate, before, `The engine preferred ${bestMoveSAN}, but this app cannot yet identify the exact reason.`);
     } else if (bestIsCastle) {
-      why = `The best move was to castle (${bestMoveSAN}). Castling moves your king to safety and connects your rooks — this should usually be a top priority.`;
-    } else if (bestIsDev && isOpening) {
-      why = `The best move was ${bestMoveSAN}, which develops your ${bestPieceName} to a good square. In the opening, getting all your pieces into the game quickly is very important.`;
-    } else if (bestControlsCenter) {
-      why = `The best move was ${bestMoveSAN}, which controls more of the center. A player who controls the center usually has more options and more active pieces.`;
+      why = `The best move was to castle (${bestMoveSAN}). Your king is still exposed in the center and needs to reach safety.`;
+    } else if (bestIsDev && isOpening && bestToSq) {
+      why = `The best move was ${bestMoveSAN}, developing the ${bestPieceName} toward ${describeSquare(bestToSq)}. Get your pieces out before attacking.`;
+    } else if (bestControlsCenter && bestToSq) {
+      why = `The best move was ${bestMoveSAN}, placing the ${bestPieceName} on ${describeSquare(bestToSq)} — a more active, central square.`;
     } else {
-      why = `The best move was ${bestMoveSAN}, which keeps your pieces better coordinated and gives you a stronger position overall.`;
+      why = `The engine preferred ${bestMoveSAN}, but this app cannot yet identify the exact reason.`;
     }
   }
 
-  // ── WHAT YOUR MOVE ALLOWS OR MISSES ──────────────────────────────────────
-  let whatAllows = '';
-
-  if (rating === 'Best' || rating === 'Good') {
-    if (isCheckmate) {
-      whatAllows = 'The game is over — well done!';
-    } else if (isCheck) {
-      whatAllows = `Your opponent is in check and must deal with it right now. This limits their choices and gives you the initiative.`;
-    } else if (isCapture && capturedPiece) {
-      whatAllows = `You are now ahead in material. More pieces usually means more power to attack and eventually checkmate.`;
-    } else if (isCastle) {
-      whatAllows = `Your king is now safe, and your rooks are ready to join the game. Great milestone!`;
-    } else {
-      whatAllows = `Your position is solid. Your opponent doesn't have any obvious tricks to exploit right now.`;
-    }
+  // ── CONCRETE CONSEQUENCE ─────────────────────────────────────────────────
+  // Only state things verified from actual legal moves or explicitly checked board state.
+  let whatAllows: string;
+  if (isCheckmate) {
+    whatAllows = 'The game is over — checkmate!';
+  } else if (oppFreeCapVerified) {
+    // Verified: piece exists, opponent has legal move to take it
+    const candidate = `Your opponent can take your ${PIECE_NAMES[oppFreeCapVerified.captured]} on ${oppFreeCapVerified.to} for free with ${oppFreeCapVerified.san}.`;
+    whatAllows = guard(candidate, after, 'No immediate threats detected.');
+  } else if (userHangingVerified.length > 0) {
+    // Verified: opponent has actual legal capture
+    const h = userHangingVerified[0];
+    whatAllows = `Your ${h.name} on ${h.square} is undefended and can be taken.`;
+  } else if (!isBestMove && freeBeforeVerified && !isCapture) {
+    // Verified: the piece existed in `before` and user had a legal capture
+    const candidate = `You could have taken the undefended ${PIECE_NAMES[freeBeforeVerified.captured]} on ${freeBeforeVerified.to} for free with ${freeBeforeVerified.san}.`;
+    whatAllows = guard(candidate, before, 'No immediate threats detected.');
+  } else if (oppChecks.length > 0 && !isBestMove) {
+    whatAllows = `Your opponent can give check with ${oppChecks[0]}.`;
   } else {
-    if (hangingAfter) {
-      whatAllows = `After your move, your ${hangingAfter} is completely unprotected! Your opponent can take it on their next move for free.`;
-    } else if (freeBefore && !isCapture) {
-      whatAllows = `You had a free capture available: you could have taken the ${freeBefore} without any risk. Always check for undefended pieces before making other moves!`;
-    } else if (isQueenMove && isOpening && moveNumber <= 9) {
-      whatAllows = `By moving your queen so early, it can be chased by your opponent's pieces. Each time they attack it, you lose a move developing everything else.`;
-    } else if (!isDev && !isCapture && !isCastle && isOpening && developedCount < 3) {
-      whatAllows = `You still have pieces sitting on their starting squares that need to come out. While you make slow moves, your opponent can develop and attack.`;
-    } else {
-      whatAllows = `Your move gives your opponent a chance to improve their position. They can now take control of more space or create threats you'll have to deal with.`;
-    }
+    whatAllows = 'No immediate threats detected.';
   }
 
   // ── BEGINNER PRINCIPLE ───────────────────────────────────────────────────
-  let beginnerPrinciple = '';
-
-  if (hangingAfter && rating !== 'Best' && rating !== 'Good') {
+  let beginnerPrinciple: string;
+  if ((oppFreeCapVerified || userHangingVerified.length > 0) && !isBestMove) {
     beginnerPrinciple = PRINCIPLES.protect;
-  } else if (freeBefore && !isCapture && rating !== 'Best' && rating !== 'Good') {
+  } else if (freeBeforeVerified && !isCapture && !isBestMove) {
     beginnerPrinciple = PRINCIPLES.free_capture;
   } else if (bestIsCastle && !isCastle) {
     beginnerPrinciple = PRINCIPLES.king_safety;
   } else if (isQueenMove && isOpening && moveNumber <= 9) {
     beginnerPrinciple = PRINCIPLES.no_queen_early;
-  } else if (isOpening && developedCount < 2 && !isDev && !isCapture && !isCastle) {
+  } else if (isOpening && devCount < 2 && !isDev && !isCapture && !isCastle) {
     beginnerPrinciple = PRINCIPLES.develop;
-  } else if (isBigPawn || bestControlsCenter || controlsCenter) {
+  } else if (controlsCenter || bestControlsCenter || isBigPawn) {
     beginnerPrinciple = PRINCIPLES.center;
   } else {
     beginnerPrinciple = PRINCIPLES.look_for_tactics;
   }
 
-  // ── NEXT PLAN ────────────────────────────────────────────────────────────
-  let nextPlan = '';
-
+  // ── CONCRETE NEXT MOVE OR IDEA ───────────────────────────────────────────
+  let nextPlan: string;
   if (after.isGameOver()) {
     nextPlan = after.isCheckmate()
-      ? `The game is over — ${isWhite ? 'white' : 'black'} wins!`
+      ? `The game is over — ${isWhite ? 'White' : 'Black'} wins!`
       : 'The game ended in a draw.';
-  } else if (isOpening && countDeveloped(after, color) < 4) {
-    nextPlan =
-      'Continue developing your remaining pieces, then look to castle if you haven\'t yet.';
-  } else if (isOpening && !after.isCheck()) {
-    nextPlan =
-      'Your pieces are well developed! Now look for ways to create threats or improve your worst piece.';
   } else {
-    nextPlan =
-      'Check for any opponent threats first, then find the move that either wins material or improves your position.';
+    nextPlan = generateNextPlan(afterFen, color);
   }
+
+  // ── DEBUG INFO ───────────────────────────────────────────────────────────
+  const debugInfo: DebugInfo = {
+    hangingUserPieces:   userHangingVerified.map(h => `${h.name} on ${h.square}`),
+    hangingOppPieces:    verifiedForkTargets.map(sq => {
+      const p = after.get(sq as Square);
+      return p ? `${PIECE_NAMES[p.type]} on ${sq}` : sq;
+    }),
+    oppFreeCaptureSAN:   oppFreeCapVerified ? `${oppFreeCapVerified.san} (takes ${PIECE_NAMES[oppFreeCapVerified.captured]} on ${oppFreeCapVerified.to})` : null,
+    missedCaptureSAN:    freeBeforeVerified ? `${freeBeforeVerified.san} (takes ${PIECE_NAMES[freeBeforeVerified.captured]} on ${freeBeforeVerified.to})` : null,
+    oppCheckMoves:       oppChecks.slice(0, 5),
+    forkDetected:        verifiedForkTargets.length >= 2,
+    rating,
+  };
 
   return {
     movePlayed,
     bestMove: bestMoveSAN,
     rating,
-    why,
-    whatAllows,
-    beginnerPrinciple,
-    nextPlan,
+    whatItDid:  sanitize(whatItDid),
+    why:        sanitize(why),
+    whatAllows: sanitize(whatAllows),
+    beginnerPrinciple: sanitize(beginnerPrinciple),
+    nextPlan:   sanitize(nextPlan),
+    debugInfo,
   };
 }
