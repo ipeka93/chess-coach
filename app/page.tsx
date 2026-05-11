@@ -6,7 +6,7 @@ import { StockfishEngine } from '../engine/stockfish';
 import { getBotMoveLAN } from '../engine/bot';
 import { classifyMove, computeScoreLoss, lanToSAN } from '../lib/evaluation';
 import { generateExplanation } from '../lib/chessCoach';
-import { generateNextPlan } from '../lib/positionAnalysis';
+import { generateNextPlan, swapTurn } from '../lib/positionAnalysis';
 import ChessBoardComponent from '../components/ChessBoard';
 import CoachPanel from '../components/CoachPanel';
 import FenInput from '../components/FenInput';
@@ -114,7 +114,7 @@ export default function Home() {
         // Patch nextPlan so it matches the position the player actually faces now.
         const playerCol = (playerColorRef.current === 'white' ? 'w' : 'b') as import('chess.js').Color;
         const freshBestSAN = lanToSAN(clone.fen(), newEval.bestMove);
-        const freshPlan = generateNextPlan(clone.fen(), playerCol, newEval.bestMove, freshBestSAN);
+        const freshPlan = generateNextPlan(swapTurn(clone.fen()), playerCol, newEval.bestMove, freshBestSAN);
         setAnalysis(prev => prev ? { ...prev, nextPlan: freshPlan } : prev);
       } catch { /* ignore */ }
       finally { setIsAnalyzing(false); }
