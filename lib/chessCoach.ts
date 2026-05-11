@@ -301,7 +301,8 @@ export function generateExplanation(
       ? `The game is over: ${isWhite ? 'White' : 'Black'} wins!`
       : 'The game ended in a draw.';
   } else {
-    nextPlan = generateNextPlan(afterFen, color);
+    const bestMoveLANForPlan = bestResult ? `${bestResult.from}${bestResult.to}${bestResult.promotion ?? ''}` : '';
+    nextPlan = generateNextPlan(afterFen, color, bestMoveLANForPlan, bestMoveSAN);
   }
 
   // ── DEBUG INFO ───────────────────────────────────────────────────────────

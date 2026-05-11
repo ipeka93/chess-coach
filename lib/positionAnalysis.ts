@@ -208,12 +208,132 @@ export function countDeveloped(chess: Chess, color: string): number {
 }
 
 /**
+ * Given a position and the Stockfish best move (LAN + SAN), simulate the move
+ * and explain WHY it is good — not what it physically does.
+ * Returns a coach-style explanation string, or null if no clear reason is found.
+ */
+export function explainStockfishMove(
+  fen: string,
+  bestMoveLAN: string,
+  bestMoveSAN: string,
+  userColor: Color,
+): string | null {
+  if (!bestMoveLAN || bestMoveLAN.length < 4) return null;
+  try {
+    const before = new Chess(fen);
+    const opp = (userColor === 'w' ? 'b' : 'w') as Color;
+
+    const fromSq = bestMoveLAN.slice(0, 2) as Square;
+    const toSq   = bestMoveLAN.slice(2, 4) as Square;
+
+    const movingPiece   = before.get(fromSq);
+    const capturedPiece = before.get(toSq);
+    if (!movingPiece) return null;
+
+    const moverName    = PIECE_NAMES[movingPiece.type] ?? 'piece';
+    const isCapture    = !!(capturedPiece && capturedPiece.color === opp);
+    const capturedName = isCapture ? (PIECE_NAMES[capturedPiece!.type] ?? 'piece') : '';
+    const capturedVal  = isCapture ? (PIECE_VALUE[capturedPiece!.type] ?? 0) : 0;
+    const moverVal     = PIECE_VALUE[movingPiece.type] ?? 0;
+
+    const after = new Chess(fen);
+    const moveResult = after.move({
+      from: fromSq,
+      to: toSq,
+      promotion: (bestMoveLAN[4] as PieceSymbol) ?? 'q',
+    });
+    if (!moveResult) return null;
+
+    const isCheck     = after.inCheck();
+    const isCheckmate = after.isCheckmate();
+
+    // Pattern 1: Checkmate
+    if (isCheckmate) {
+      return `${bestMoveSAN} is checkmate: the king has no escape. Play it to end the game.`;
+    }
+
+    // Pattern 2: Capture + check
+    if (isCapture && isCheck) {
+      if (capturedVal > moverVal) {
+        return `${bestMoveSAN} wins a ${capturedName} and gives check at the same time; your opponent must deal with the check and loses material.`;
+      }
+      if (capturedVal === moverVal) {
+        return `${bestMoveSAN} trades ${moverName}s and gives check, forcing the king to move and keeping you in control of the position.`;
+      }
+      return `${bestMoveSAN} gives check by capturing on ${toSq}, forcing your opponent to respond immediately.`;
+    }
+
+    // Pattern 3: Capture
+    if (isCapture) {
+      const canBeRecaptured = after.isAttacked(toSq, opp);
+      if (!canBeRecaptured) {
+        if (capturedVal > moverVal) {
+          return `${bestMoveSAN} wins a ${capturedName} for free: it has no protection, so you gain material with no risk.`;
+        }
+        return `${bestMoveSAN} takes the ${capturedName} on ${toSq} with no recapture: free material.`;
+      }
+      if (capturedVal > moverVal) {
+        return `${bestMoveSAN} captures the ${capturedName} (worth more than your ${moverName}), winning material even after the recapture.`;
+      }
+      // Equal or losing trade — fall through to other patterns
+    }
+
+    // Pattern 4: Check without capture
+    if (isCheck) {
+      return `${bestMoveSAN} puts the king in check, forcing your opponent to respond and giving you control of the next move.`;
+    }
+
+    // Pattern 5: Fork
+    const forkInfo = detectFork(fen, bestMoveLAN);
+    if (forkInfo && forkInfo.targets.length >= 2) {
+      const targetNames = forkInfo.targets.slice(0, 2).map(sq => {
+        const p = after.get(sq as Square);
+        return p ? `the ${PIECE_NAMES[p.type]} on ${sq}` : sq;
+      });
+      return `${bestMoveSAN} is a fork: your ${moverName} attacks ${targetNames.join(' and ')} at the same time. Your opponent can only save one.`;
+    }
+
+    // Pattern 6: Creates a winning threat (free capture available next turn)
+    try {
+      const swappedAfter = new Chess(swapTurn(after.fen()));
+      const threat = getBestFreeCapture(swappedAfter);
+      if (threat) {
+        const threatTarget = after.get(threat.to as Square);
+        if (threatTarget && threatTarget.color === opp) {
+          return `${bestMoveSAN} threatens to win the ${PIECE_NAMES[threatTarget.type]} on ${threat.to} for free next move; your opponent must defend it or lose material.`;
+        }
+      }
+    } catch { /* ignore */ }
+
+    // Pattern 7: Castling
+    if (moveResult.isKingsideCastle() || moveResult.isQueensideCastle()) {
+      const side = moveResult.isKingsideCastle() ? 'kingside' : 'queenside';
+      return `${bestMoveSAN} castles ${side}: your king reaches safety behind the pawns and your rook becomes active.`;
+    }
+
+    // Pattern 8: Development in the opening
+    if (before.moveNumber() <= 15 && isDevelopment(fromSq, movingPiece.type, userColor)) {
+      return `${bestMoveSAN} develops your ${moverName} toward the center, getting it off the back rank and into the game.`;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generate a specific, concrete next-move suggestion for `userColor`.
  * `afterFen` is the position after the user's move (opponent to move).
  *
  * All suggestions are verified against actual legal moves — no hallucinated claims.
  */
-export function generateNextPlan(afterFen: string, userColor: Color): string {
+export function generateNextPlan(
+  afterFen: string,
+  userColor: Color,
+  bestMoveLAN?: string,
+  bestMoveSAN?: string,
+): string {
   try {
     const after = new Chess(afterFen);
     const opp = (userColor === 'w' ? 'b' : 'w') as Color;
@@ -245,7 +365,7 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
       swapped = new Chess(swapTurn(afterFen));
       swappedMoves = swapped.moves({ verbose: true });
     } catch {
-      return 'No clear plan detected. Look for checks, captures, or threats.';
+      return 'Look for checks, captures, or moves that threaten an opponent piece.';
     }
 
     // 3. Opponent piece user can take for free next turn
@@ -287,8 +407,15 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
       }
     }
 
-    return 'No clear plan detected. Look for checks, captures, or threats.';
+    // 6. Stockfish-backed explanation — describe WHY the move is good, not just what it does
+    if (bestMoveLAN && bestMoveSAN) {
+      const explanation = explainStockfishMove(afterFen, bestMoveLAN, bestMoveSAN, userColor);
+      if (explanation) return explanation;
+    }
+
+    // 7. Last resort
+    return 'Look for checks, captures, or moves that threaten an opponent piece.';
   } catch {
-    return 'No clear plan detected. Look for checks, captures, or threats.';
+    return 'Look for checks, captures, or moves that threaten an opponent piece.';
   }
 }
