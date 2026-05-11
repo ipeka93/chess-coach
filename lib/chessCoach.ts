@@ -36,7 +36,7 @@ function sanitize(text: string): string {
   const lower = text.toLowerCase();
   for (const phrase of BANNED_PHRASES) {
     if (lower.includes(phrase)) {
-      return '[coaching engine: generic phrase slipped through — report this position]';
+      return '[coaching engine: generic phrase slipped through; report this position]';
     }
   }
   return text;
@@ -44,9 +44,9 @@ function sanitize(text: string): string {
 
 const PRINCIPLES = {
   protect: 'Always check if your pieces are defended. An unprotected piece can be taken for free on the next move.',
-  free_capture: 'Before every move, scan for undefended enemy pieces — taking them costs nothing.',
+  free_capture: 'Before every move, scan for undefended enemy pieces: taking them costs nothing.',
   king_safety: 'Castle early to move your king behind your pawns. A king stuck in the center is a liability.',
-  no_queen_early: "Don't bring your queen out in the first few moves — it gets chased by cheaper pieces and you waste tempo.",
+  no_queen_early: "Don't bring your queen out in the first few moves; it gets chased by cheaper pieces and you waste tempo.",
   develop: 'In the opening, get your knights and bishops off the back rank before pushing pawns or attacking.',
   center: 'Pieces placed in or near the center (d4/d5/e4/e5) control more squares and are harder to attack.',
   look_for_tactics: 'Before every move, ask: can I take a piece, give check, or create a threat my opponent must answer?',
@@ -179,13 +179,13 @@ export function generateExplanation(
   // ── WHAT IT DID ──────────────────────────────────────────────────────────
   let whatItDid: string;
   if (isCheckmate) {
-    whatItDid = `Your ${pieceName} moved to ${toSq} — checkmate!`;
+    whatItDid = `Your ${pieceName} moved to ${toSq}: checkmate!`;
   } else if (isCheck) {
     whatItDid = `Your ${pieceName} moved to ${describeSquare(toSq)}, putting the king in check.`;
   } else if (isCapture && captured) {
     whatItDid = `Your ${pieceName} on ${fromSq} took the ${PIECE_NAMES[captured]} on ${describeSquare(toSq)}.`;
   } else if (isCastle) {
-    whatItDid = `You castled — king moved to safety, rook became active.`;
+    whatItDid = `You castled: king moved to safety, rook became active.`;
   } else if (verifiedForkTargets.length >= 2) {
     // Both fork targets verified to exist on those squares
     const targets = verifiedForkTargets.slice(0, 2).map(sq => {
@@ -193,7 +193,7 @@ export function generateExplanation(
       return `the ${PIECE_NAMES[p.type]} on ${sq}`;
     }).join(' and ');
     whatItDid = guard(
-      `Your ${pieceName} moved to ${toSq}, attacking ${targets} at the same time — a fork!`,
+      `Your ${pieceName} moved to ${toSq}, attacking ${targets} at the same time, creating a fork!`,
       after,
       `Your ${pieceName} moved from ${fromSq} to ${describeSquare(toSq)}.`,
     );
@@ -205,30 +205,30 @@ export function generateExplanation(
   let why: string;
   if (isBestMove) {
     if (isCheckmate) {
-      why = `That's the winning move — the king has no legal escape.`;
+      why = `That's the winning move: the king has no legal escape.`;
     } else if (isCheck) {
       why = `Checking the king on ${toSq} forces your opponent to respond, keeping you in control.`;
     } else if (isCapture && captured) {
-      why = `Taking the ${PIECE_NAMES[captured]} on ${describeSquare(toSq)} wins material — you're now up a ${PIECE_NAMES[captured]}.`;
+      why = `Taking the ${PIECE_NAMES[captured]} on ${describeSquare(toSq)} wins material; you're now up a ${PIECE_NAMES[captured]}.`;
     } else if (isCastle) {
-      why = `Castling was the engine's top choice — king behind the pawns and rook enters the game.`;
+      why = `Castling was the engine's top choice: king behind the pawns and rook enters the game.`;
     } else if (verifiedForkTargets.length >= 2) {
       const targets = verifiedForkTargets.slice(0, 2).map(sq => {
         const p = after.get(sq as Square)!;
         return `the ${PIECE_NAMES[p.type]} on ${sq}`;
       }).join(' and ');
-      const candidate = `Your ${pieceName} on ${toSq} now attacks ${targets} at once — your opponent can only save one.`;
+      const candidate = `Your ${pieceName} on ${toSq} now attacks ${targets} at once; your opponent can only save one.`;
       why = guard(candidate, after, `The engine prefers ${bestMoveSAN}, but this app cannot yet identify the exact reason.`);
     } else if (nextFreeCapAfter) {
       // Verified: user can legally take this piece and it exists on that square
-      const candidate = `After this move, your opponent's ${PIECE_NAMES[nextFreeCapAfter.captured]} on ${nextFreeCapAfter.to} is undefended — take it with ${nextFreeCapAfter.san} next turn.`;
+      const candidate = `After this move, your opponent's ${PIECE_NAMES[nextFreeCapAfter.captured]} on ${nextFreeCapAfter.to} is undefended; take it with ${nextFreeCapAfter.san} next turn.`;
       why = guard(candidate, after, `The engine prefers ${bestMoveSAN}, but this app cannot yet identify the exact reason.`);
     } else if (isDev && isOpening) {
       why = `Developing your ${pieceName} to ${describeSquare(toSq)} gets it off the back rank and into the game.`;
     } else if (isBigPawn && controlsCenter) {
       why = `Pushing the pawn two squares stakes a claim in the center, giving your pieces more room.`;
     } else if (controlsCenter) {
-      why = `${describeSquare(toSq)} is a central square — your ${pieceName} controls more of the board from there.`;
+      why = `${describeSquare(toSq)} is a central square, so your ${pieceName} controls more of the board from there.`;
     } else {
       why = `The engine prefers ${bestMoveSAN}, but this app cannot yet identify the exact reason.`;
     }
@@ -237,17 +237,17 @@ export function generateExplanation(
     if (bestCaptureVerified && bestCaptured) {
       // Verified: the captured piece exists in `before`
       const isFreeCapture = freeBeforeVerified?.to === bestToSq;
-      const qualifier = isFreeCapture ? 'for free — it has no protection' : '';
+      const qualifier = isFreeCapture ? 'for free: it has no protection' : '';
       const candidate = isFreeCapture
-        ? `The best move was ${bestMoveSAN} — it takes the undefended ${PIECE_NAMES[bestCaptured]} on ${describeSquare(bestToSq)} for free.`
-        : `The best move was ${bestMoveSAN} — it captures the ${PIECE_NAMES[bestCaptured]} on ${describeSquare(bestToSq)}${qualifier}.`;
+        ? `The best move was ${bestMoveSAN}, taking the undefended ${PIECE_NAMES[bestCaptured]} on ${describeSquare(bestToSq)} for free.`
+        : `The best move was ${bestMoveSAN}, capturing the ${PIECE_NAMES[bestCaptured]} on ${describeSquare(bestToSq)}${qualifier}.`;
       why = guard(candidate, before, `The engine preferred ${bestMoveSAN}, but this app cannot yet identify the exact reason.`);
     } else if (bestIsCastle) {
       why = `The best move was to castle (${bestMoveSAN}). Your king is still exposed in the center and needs to reach safety.`;
     } else if (bestIsDev && isOpening && bestToSq) {
       why = `The best move was ${bestMoveSAN}, developing the ${bestPieceName} toward ${describeSquare(bestToSq)}. Get your pieces out before attacking.`;
     } else if (bestControlsCenter && bestToSq) {
-      why = `The best move was ${bestMoveSAN}, placing the ${bestPieceName} on ${describeSquare(bestToSq)} — a more active, central square.`;
+      why = `The best move was ${bestMoveSAN}, placing the ${bestPieceName} on ${describeSquare(bestToSq)}, a more active, central square.`;
     } else {
       why = `The engine preferred ${bestMoveSAN}, but this app cannot yet identify the exact reason.`;
     }
@@ -257,7 +257,7 @@ export function generateExplanation(
   // Only state things verified from actual legal moves or explicitly checked board state.
   let whatAllows: string;
   if (isCheckmate) {
-    whatAllows = 'The game is over — checkmate!';
+    whatAllows = 'The game is over: checkmate!';
   } else if (oppFreeCapVerified) {
     // Verified: piece exists, opponent has legal move to take it
     const candidate = `Your opponent can take your ${PIECE_NAMES[oppFreeCapVerified.captured]} on ${oppFreeCapVerified.to} for free with ${oppFreeCapVerified.san}.`;
@@ -298,7 +298,7 @@ export function generateExplanation(
   let nextPlan: string;
   if (after.isGameOver()) {
     nextPlan = after.isCheckmate()
-      ? `The game is over — ${isWhite ? 'White' : 'Black'} wins!`
+      ? `The game is over: ${isWhite ? 'White' : 'Black'} wins!`
       : 'The game ended in a draw.';
   } else {
     nextPlan = generateNextPlan(afterFen, color);

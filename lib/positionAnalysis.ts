@@ -226,7 +226,7 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
       // Double-check: the piece must exist in the after position
       const pieceCheck = after.get(oppFreeCap.to as Square);
       if (pieceCheck && pieceCheck.color === userColor && PIECE_NAMES[pieceCheck.type] === PIECE_NAMES[oppFreeCap.captured]) {
-        return `Defend your ${PIECE_NAMES[oppFreeCap.captured]} on ${oppFreeCap.to} — your opponent can take it with ${oppFreeCap.san}.`;
+        return `Defend your ${PIECE_NAMES[oppFreeCap.captured]} on ${oppFreeCap.to}; your opponent can take it with ${oppFreeCap.san}.`;
       }
     }
 
@@ -234,7 +234,7 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
     const oppLegalMoves = after.moves({ verbose: true });
     for (const h of getHangingPieces(after, userColor)) {
       if (oppLegalMoves.some((m: Move) => m.to === h.square && m.isCapture())) {
-        return `Defend your ${h.name} on ${h.square} — it is undefended and can be taken.`;
+        return `Defend your ${h.name} on ${h.square}: it is undefended and can be taken.`;
       }
     }
 
@@ -256,7 +256,7 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
       // Verify the piece still exists and is the right type
       const pieceCheck = after.get(h.square);
       if (pieceCheck && pieceCheck.color === opp && PIECE_NAMES[pieceCheck.type] === h.name) {
-        return `Your opponent's ${h.name} on ${h.square} has no protection — take it with ${takingMove.san} if they don't defend it.`;
+        return `Your opponent's ${h.name} on ${h.square} has no protection; take it with ${takingMove.san} if they don't defend it.`;
       }
     }
 
@@ -272,7 +272,7 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
         const castleMove = swappedMoves.find((m: Move) => m.isKingsideCastle() || m.isQueensideCastle());
         if (castleMove) {
           const side = castleMove.isKingsideCastle() ? 'kingside' : 'queenside';
-          return `Castle ${side} (${castleMove.san}) — your king is still in the center and needs to be tucked away.`;
+          return `Castle ${side} (${castleMove.san}): your king is still in the center and needs to be tucked away.`;
         }
       }
     }
@@ -283,7 +283,7 @@ export function generateNextPlan(afterFen: string, userColor: Color): string {
       // Verify piece exists in after position (it won't have moved if opp doesn't take it)
       const pieceCheck = after.get(nextFreeCap.to as Square);
       if (pieceCheck && pieceCheck.color === opp && PIECE_NAMES[pieceCheck.type] === PIECE_NAMES[nextFreeCap.captured]) {
-        return `Take the undefended ${PIECE_NAMES[nextFreeCap.captured]} on ${nextFreeCap.to} with ${nextFreeCap.san} — it has no protection.`;
+        return `Take the undefended ${PIECE_NAMES[nextFreeCap.captured]} on ${nextFreeCap.to} with ${nextFreeCap.san}: it has no protection.`;
       }
     }
 

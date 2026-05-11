@@ -101,8 +101,8 @@ export default function Home() {
       catch { return; }
       gameRef.current = clone;
       setFen(clone.fen());
-      // Board position changed — clear coaching so it never describes the wrong board
-      setAnalysis(null);
+      // Keep analysis — stage B only shows nextPlan, which remains useful after the bot moves.
+      // isAnalyzing while we re-evaluate the new position for the next best-move hint.
       setIsAnalyzing(true);
       try {
         const newEval = await engine.evaluate(clone.fen());
@@ -227,6 +227,7 @@ export default function Home() {
   // ── Trigger bot move on demand ────────────────────────────────────────────
   const handleOpponentMove = useCallback(async () => {
     setWaitingForOpponent(false);
+    setBestMoveLAN(''); setBestMoveSAN('');
     await maybeTriggerBotMove(gameRef.current.fen());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -340,7 +341,7 @@ export default function Home() {
               ) : bestMoveSAN ? (
                 <div className="flex items-center gap-3">
                   <span className="font-mono text-3xl font-bold text-emerald-400">{bestMoveSAN}</span>
-                  <span className="text-slate-400 text-xs">shown as a green arrow on the board</span>
+                  <span className="text-slate-400 text-xs">shown as animated highlights on the board</span>
                 </div>
               ) : (
                 <p className="text-slate-500 text-sm py-1">
@@ -350,16 +351,20 @@ export default function Home() {
             </div>
 
             {/* Move coaching */}
-            <CoachPanel analysis={analysis} isAnalyzing={isAnalyzing && !bestMoveSAN} />
+            <CoachPanel
+              analysis={analysis}
+              isAnalyzing={isAnalyzing && !bestMoveSAN}
+              stage={waitingForOpponent ? 'waiting-for-opponent' : 'player-turn'}
+            />
 
             {/* How to use — only before first move */}
             {!analysis && !isAnalyzing && (
               <div className="bg-slate-800/40 border border-slate-700/40 rounded-xl px-4 py-3">
                 <p className="text-sm font-semibold text-slate-300 mb-2">How to use</p>
                 <ul className="text-slate-400 text-xs space-y-1.5">
-                  <li>• Click a piece then click where to move it — or drag and drop</li>
+                  <li>• Click a piece then click where to move it, or drag and drop</li>
                   <li>• After each move you'll see coaching feedback here</li>
-                  <li>• The green arrow on the board shows the best move</li>
+                  <li>• The green animated highlight on the board shows the best move path</li>
                   <li>• Tap ♟️ <strong className="text-slate-300">Game Mode</strong> to play against a bot</li>
                 </ul>
               </div>

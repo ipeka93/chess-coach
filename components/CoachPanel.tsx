@@ -16,6 +16,7 @@ const RATING_CONFIG: Record<
 interface CoachPanelProps {
   analysis: MoveAnalysis | null;
   isAnalyzing: boolean;
+  stage: 'waiting-for-opponent' | 'player-turn';
 }
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -29,13 +30,13 @@ function Field({ label, value }: { label: string; value: string }) {
 
 function DebugPanel({ info }: { info: DebugInfo }) {
   const rows: { label: string; value: string }[] = [
-    { label: 'Rating', value: info.rating },
-    { label: 'Fork detected', value: info.forkDetected ? 'yes' : 'no' },
+    { label: 'Rating',                value: info.rating },
+    { label: 'Fork detected',          value: info.forkDetected ? 'yes' : 'no' },
     { label: "User's hanging pieces",  value: info.hangingUserPieces.join(', ')  || 'none' },
     { label: "Opp's hanging pieces",   value: info.hangingOppPieces.join(', ')   || 'none' },
     { label: 'Opp free capture',       value: info.oppFreeCaptureSAN             ?? 'none' },
     { label: 'Missed capture',         value: info.missedCaptureSAN              ?? 'none' },
-    { label: 'Opp check moves',        value: info.oppCheckMoves.join(', ')       || 'none' },
+    { label: 'Opp check moves',        value: info.oppCheckMoves.join(', ')      || 'none' },
   ];
 
   return (
@@ -55,63 +56,76 @@ function DebugPanel({ info }: { info: DebugInfo }) {
   );
 }
 
-export default function CoachPanel({ analysis, isAnalyzing }: CoachPanelProps) {
+export default function CoachPanel({ analysis, isAnalyzing, stage }: CoachPanelProps) {
   if (isAnalyzing) {
     return (
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
         <div className="flex items-center gap-3 text-slate-300">
           <div className="h-4 w-4 rounded-full border-2 border-slate-400 border-t-white animate-spin" />
-          <span className="text-sm">Analyzing your move…</span>
+          <span className="text-sm">Analyzing your move...</span>
         </div>
       </div>
     );
   }
 
+  // ── Stage A: Player just moved, waiting for opponent ─────────────────────
+  if (stage === 'waiting-for-opponent') {
+    if (!analysis) {
+      return (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+          <p className="text-slate-400 text-sm text-center py-4">Analyzing...</p>
+        </div>
+      );
+    }
+
+    const config = RATING_CONFIG[analysis.rating];
+    return (
+      <div className={`rounded-xl border ${config.border} ${config.bg} p-5`}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-bold text-white">Move Review</h2>
+          <span className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full border ${config.border} ${config.text}`}>
+            {config.label}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-5">
+          <div className="bg-slate-900/60 rounded-lg p-3 text-center">
+            <p className="text-xs text-slate-400 mb-1">Move Played</p>
+            <p className="font-mono text-lg font-bold text-white">{analysis.movePlayed}</p>
+          </div>
+          <div className="bg-slate-900/60 rounded-lg p-3 text-center">
+            <p className="text-xs text-slate-400 mb-1">Best Move</p>
+            <p className="font-mono text-lg font-bold text-emerald-400">{analysis.bestMove || '(none)'}</p>
+          </div>
+        </div>
+
+        <Field label="What it did"           value={analysis.whatItDid} />
+        <Field label="Why this move matters" value={analysis.why} />
+        <Field label="Concrete consequence"  value={analysis.whatAllows} />
+        <Field label="Lesson"                value={analysis.beginnerPrinciple} />
+
+        {analysis.debugInfo && <DebugPanel info={analysis.debugInfo} />}
+      </div>
+    );
+  }
+
+  // ── Stage B: Opponent finished, player's turn ─────────────────────────────
   if (!analysis) {
     return (
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
-        <p className="text-slate-400 text-sm text-center py-4">Make a move to get coaching feedback.</p>
+        <p className="text-slate-400 text-sm text-center py-4">
+          Make your first move. The green path on the board shows the engine's suggestion.
+        </p>
       </div>
     );
   }
 
-  const config = RATING_CONFIG[analysis.rating];
-
   return (
-    <div className={`rounded-xl border ${config.border} ${config.bg} p-5`}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-base font-bold text-white">Move Review</h2>
-        <span className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full border ${config.border} ${config.text}`}>
-          {config.label}
-        </span>
-      </div>
-
-      {/* Move played vs best */}
-      <div className="grid grid-cols-2 gap-3 mb-5">
-        <div className="bg-slate-900/60 rounded-lg p-3 text-center">
-          <p className="text-xs text-slate-400 mb-1">Move Played</p>
-          <p className="font-mono text-lg font-bold text-white">{analysis.movePlayed}</p>
-        </div>
-        <div className="bg-slate-900/60 rounded-lg p-3 text-center">
-          <p className="text-xs text-slate-400 mb-1">Best Move</p>
-          <p className="font-mono text-lg font-bold text-emerald-400">{analysis.bestMove || '—'}</p>
-        </div>
-      </div>
-
-      <Field label="What it did"              value={analysis.whatItDid} />
-      <Field label="Why this move matters"    value={analysis.why} />
-      <Field label="Concrete consequence"     value={analysis.whatAllows} />
-      <Field label="Lesson"                   value={analysis.beginnerPrinciple} />
-
-      <div className="mt-1 pt-4 border-t border-slate-700/60">
-        <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-1">
-          Concrete next move or idea
-        </p>
-        <p className="text-slate-200 leading-relaxed text-sm">{analysis.nextPlan}</p>
-      </div>
-
-      {analysis.debugInfo && <DebugPanel info={analysis.debugInfo} />}
+    <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+      <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">
+        What to do next
+      </p>
+      <p className="text-slate-100 leading-relaxed text-sm">{analysis.nextPlan}</p>
     </div>
   );
 }

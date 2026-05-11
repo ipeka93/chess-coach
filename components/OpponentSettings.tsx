@@ -6,7 +6,7 @@ import type { OpponentMode, PlayerColor, BotDifficulty } from '../types/chess';
 
 // ── Edit option descriptions here ────────────────────────────────────────────
 const OPPONENT_OPTIONS: { value: OpponentMode; label: string; description: string }[] = [
-  { value: 'human',     label: 'Human vs Human', description: 'You control both sides — great for practice or playing with a friend.' },
+  { value: 'human',     label: 'Human vs Human', description: 'You control both sides. Great for practice or playing with a friend.' },
   { value: 'random',    label: 'Random Bot',      description: 'Plays random legal moves. Easy to beat, good for absolute beginners.' },
   { value: 'stockfish', label: 'Stockfish Bot',   description: 'Plays strong engine moves. Choose a difficulty level below.' },
 ];
@@ -17,7 +17,7 @@ const COLOR_OPTIONS: { value: PlayerColor; label: string; description: string }[
 ];
 
 const DIFFICULTY_OPTIONS: { value: BotDifficulty; label: string; description: string }[] = [
-  { value: 'easy',   label: 'Easy',   description: 'Random moves — same as Random Bot.' },
+  { value: 'easy',   label: 'Easy',   description: 'Random moves, same as Random Bot.' },
   { value: 'medium', label: 'Medium', description: 'Good moves, but not always the best.' },
   { value: 'hard',   label: 'Hard',   description: 'Always plays the strongest possible move.' },
 ];
