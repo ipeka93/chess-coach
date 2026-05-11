@@ -220,7 +220,10 @@ export function explainStockfishMove(
 ): string | null {
   if (!bestMoveLAN || bestMoveLAN.length < 4) return null;
   try {
-    const before = new Chess(fen);
+    // The FEN may arrive with the opponent to move (from generateNextPlan's swapped context).
+    // Normalise to player-to-move so the simulation works correctly.
+    const playerFen = new Chess(fen).turn() === userColor ? fen : swapTurn(fen);
+    const before = new Chess(playerFen);
     const opp = (userColor === 'w' ? 'b' : 'w') as Color;
 
     const fromSq = bestMoveLAN.slice(0, 2) as Square;
@@ -236,7 +239,7 @@ export function explainStockfishMove(
     const capturedVal  = isCapture ? (PIECE_VALUE[capturedPiece!.type] ?? 0) : 0;
     const moverVal     = PIECE_VALUE[movingPiece.type] ?? 0;
 
-    const after = new Chess(fen);
+    const after = new Chess(playerFen);
     const moveResult = after.move({
       from: fromSq,
       to: toSq,
